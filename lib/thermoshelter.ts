@@ -540,8 +540,28 @@ export function materialById(id: string): Material {
   return materials.find((m) => m.id === id) ?? materials[0];
 }
 
+export function registerMaterials(newMaterials: Material[]) {
+  for (const m of newMaterials) {
+    const idx = materials.findIndex(x => x.id === m.id);
+    if (idx >= 0) {
+      materials[idx] = m;
+    } else {
+      materials.push(m);
+    }
+  }
+}
+
 export function climateById(id: string): ClimateProfile {
   return climates.find((c) => c.id === id) ?? climates[0];
+}
+
+export function registerClimateProfile(profile: ClimateProfile) {
+  const idx = climates.findIndex((c) => c.id === profile.id);
+  if (idx >= 0) {
+    climates[idx] = profile;
+  } else {
+    climates.unshift(profile);
+  }
 }
 
 export function simulateShelter(design: ShelterDesign, climate: ClimateProfile): SimulationOutput {
