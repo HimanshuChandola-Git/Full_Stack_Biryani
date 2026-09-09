@@ -1,16 +1,25 @@
 import { NextResponse } from 'next/server'
-import { optimizeShelter, climateById, type ClimateProfile } from '@/lib/thermoshelter'
+import { defaultDesign, climateById, type ClimateProfile, type ShelterDesign } from '@/lib/thermoshelter'
+import { runAiOptimization } from '@/lib/ai-optimizer'
 import { repository } from '@/lib/supabase-repository'
 
 export async function POST(req: Request) {
   try {
     const body = await req.json()
     const climate: ClimateProfile = body?.climate ?? climateById('ladakh')
-    const parameters = body?.parameters || {}
-    const objective = body?.objective || 'Maintain thermal comfort'
+    const currentDesign: ShelterDesign = body?.currentDesign ?? defaultDesign
+    const parameters: string[] = Array.isArray(body?.parameters)
+      ? body.parameters
+      : ['Orientation', 'Wall Material', 'Roof Material', 'Window Area']
+    const objective: string = body?.objective || 'Minimize heating requirement'
 
-    // Run optimization study
-    const opt = optimizeShelter(parameters, climate)
+    // Run deep thermodynamic & AI optimization study
+    const opt = await runAiOptimization({
+      currentDesign,
+      climate,
+      parameters,
+      objective,
+    })
 
     try {
       if (climate.id) {
@@ -24,8 +33,8 @@ export async function POST(req: Request) {
       success: true,
       opt,
       objective,
-      evaluatedConfigurations: 48,
-      algorithm: 'Area-Specific Climate Performance Search',
+      evaluatedConfigurations: opt.configurationsEvaluated,
+      algorithm: opt.aiAnalysis.model,
       timestamp: new Date().toISOString(),
     })
   } catch (err: any) {
@@ -35,3 +44,4 @@ export async function POST(req: Request) {
     )
   }
 }
+

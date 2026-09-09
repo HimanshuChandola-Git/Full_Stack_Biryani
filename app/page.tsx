@@ -7,6 +7,7 @@ import { Activity, ArrowRight, BarChart3, BookOpen, Box, Calculator, Check, Chev
 import { climates, defaultDesign, materialById, materials, climateById, optimizeShelter, simulateShelter, registerMaterials, registerClimateProfile, type ShelterDesign, type Material, type ClimateProfile } from '@/lib/thermoshelter'
 import { repository } from '@/lib/supabase-repository'
 import MaterialUploadModal from '@/components/materials/MaterialUploadModal'
+import OptimizationPage from '@/components/optimization/OptimizationPage'
 
 // Three.js component — loaded client-side only (never SSR)
 const ThreeBuilding = dynamic_(() => import('@/components/three/ThreeBuilding'), {
@@ -90,28 +91,35 @@ export default function Page(){
    }
  }
 
- const runOptimization=async ()=>{
-   setOptimizationRunning(true)
-   try {
-     const res = await fetch('/api/optimize', {
-       method: 'POST',
-       headers: { 'Content-Type': 'application/json' },
-       body: JSON.stringify({ climate, parameters: {} }),
-     })
-     const data = await res.json()
-     if (data.success && data.opt) {
-       setOptResult(data.opt)
-     } else {
-       setOptResult(optimizeShelter({}, climate))
-     }
-   } catch {
-     setOptResult(optimizeShelter({}, climate))
-   } finally {
-     setOptimizationRunning(false)
-     setOptimized(true)
-     repository.saveOptimization(climate.id, opt)
-   }
- }
+ const runOptimization = async (parameters?: string[], objective?: string) => {
+    setOptimizationRunning(true)
+    const activeParams = parameters ?? ['Orientation', 'Wall Material', 'Roof Material', 'Window Area']
+    const activeObj = objective ?? 'Minimize heating requirement'
+    try {
+      const res = await fetch('/api/optimize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          climate,
+          currentDesign: design,
+          parameters: activeParams,
+          objective: activeObj,
+        }),
+      })
+      const data = await res.json()
+      if (data.success && data.opt) {
+        setOptResult(data.opt)
+      } else {
+        setOptResult(optimizeShelter({}, climate))
+      }
+    } catch {
+      setOptResult(optimizeShelter({}, climate))
+    } finally {
+      setOptimizationRunning(false)
+      setOptimized(true)
+      repository.saveOptimization(climate.id, opt)
+    }
+  }
 
   const filtered = materialsList.filter(
     m =>
@@ -228,7 +236,18 @@ export default function Page(){
           ) : section === 'Compare Designs' ? (
             <ComparePage sim={sim} climate={climate} materialsList={materialsList} />
           ) : section === 'Optimization' ? (
-            <OptimizationPage opt={opt} running={optimizationRunning} optimized={optimized} run={runOptimization} />
+            <OptimizationPage
+              opt={opt}
+              running={optimizationRunning}
+              optimized={optimized}
+              run={runOptimization}
+              currentDesign={design}
+              climate={climate}
+              onApplyOptimal={(bestDesign) => {
+                setDesign(bestDesign)
+                setSaved(false)
+              }}
+            />
           ) : (
             <ReportsPage design={design} climate={climate} sim={sim} />
           )}
@@ -1054,7 +1073,7 @@ function ComparePage({sim,climate,materialsList}:{sim:ReturnType<typeof simulate
     </div>
   )
 }
-function OptimizationPage({opt,running,optimized,run}:{opt:ReturnType<typeof optimizeShelter>;running:boolean;optimized:boolean;run:()=>void}){const [selected,setSelected]=useState(['Orientation','Wall Material','Roof Material','Window Area']);return <div className="grid gap-5 lg:grid-cols-[0.75fr_1.25fr]"><section className="rounded-xl border border-border bg-card p-6"><div className="mb-6"><h2 className="font-semibold">Optimization study</h2><p className="mt-1 text-xs leading-5 text-muted-foreground">Search the design space against a climate-specific objective.</p></div><div className="text-xs font-medium">Parameters to optimize</div><div className="mt-3 grid gap-2">{['Orientation','Wall Material','Roof Material','Window Area','Shelter Dimensions','Thermal Storage'].map(x=><label key={x} className="flex items-center gap-3 rounded-md border border-border p-3 text-sm"><input type="checkbox" checked={selected.includes(x)} onChange={()=>setSelected(s=>s.includes(x)?s.filter(y=>y!==x):[...s,x])} className="accent-primary"/>{x}</label>)}</div><div className="mt-6 text-xs font-medium">Objective</div><select className="mt-3 h-10 w-full rounded-md border border-input bg-background px-3 text-sm"><option>Maintain thermal comfort</option><option>Minimize heat loss</option><option>Maximize useful solar gain</option><option>Minimize heating requirement</option></select><button disabled={running} onClick={run} className="mt-6 w-full rounded-md bg-primary px-4 py-3 text-sm font-medium text-primary-foreground disabled:opacity-60">{running?'Searching possible configurations…':'Optimize design'} <Sparkles className="ml-1 inline size-4"/></button>{running&&<div className="mt-4 h-1.5 overflow-hidden rounded-full bg-muted"><div className="h-full w-2/3 animate-pulse rounded-full bg-primary"/></div>}</section><section className="rounded-xl border border-border bg-card p-6">{optimized?<><div className="flex items-center justify-between"><div><Badge>OPTIMAL DESIGN FOUND</Badge><h2 className="mt-3 text-2xl font-semibold tracking-tight">A stronger starting point for this climate.</h2></div><div className="text-right"><div className="text-3xl font-semibold text-primary">{opt.score}</div><div className="text-[10px] uppercase tracking-wider text-muted-foreground">Design score</div></div></div><div className="mt-7 grid gap-3 sm:grid-cols-2">{[['Orientation',opt.orientation],['Wall',opt.wall],['Roof',opt.roof],['Window area',`${opt.windowArea}%`],['Thermal storage',opt.thermalStorage],['Configurations evaluated','48']].map(([a,b])=><div key={a} className="rounded-lg bg-muted p-4"><div className="text-[10px] uppercase tracking-wider text-muted-foreground">{a}</div><div className="mt-2 text-sm font-semibold">{b}</div></div>)}</div><div className="mt-6 rounded-lg border border-primary/20 bg-primary/5 p-5"><div className="flex items-center gap-2 text-sm font-semibold"><Sparkles className="size-4 text-primary"/>Why this design?</div><div className="mt-4 grid gap-3">{opt.explanation.map(x=><div key={x} className="flex items-start gap-2 text-sm text-muted-foreground"><Check className="mt-0.5 size-4 shrink-0 text-primary"/>{x}</div>)}</div></div></>:<div className="flex min-h-96 flex-col items-center justify-center text-center"><div className="grid size-14 place-items-center rounded-full bg-muted text-primary"><Sparkles className="size-6"/></div><h2 className="mt-5 text-xl font-semibold">Find a better-fit configuration</h2><p className="mt-2 max-w-sm text-sm leading-6 text-muted-foreground">ThermoShelter will evaluate selected parameters relative to your climate and explain the recommendation.</p></div>}</section></div>}
+
 function ReportsPage({design,climate,sim}:{design:ShelterDesign;climate:ReturnType<typeof climateById>;sim:ReturnType<typeof simulateShelter>}){return <div className="mx-auto max-w-4xl"><section className="rounded-xl border border-border bg-card p-8"><div className="flex flex-wrap items-start justify-between gap-4 border-b border-border pb-6"><div><div className="flex items-center gap-2"><div className="grid size-8 place-items-center rounded-md bg-primary text-primary-foreground"><Thermometer className="size-4"/></div><span className="font-semibold">ThermoShelter</span></div><h2 className="mt-7 text-2xl font-semibold">Thermal design study</h2><p className="mt-1 text-sm text-muted-foreground">{design.name} · Generated prototype report</p></div><button onClick={()=>window.print()} className="rounded-md border border-border px-4 py-2 text-sm font-medium"><Download className="mr-2 inline size-4"/>Export report</button></div><div className="grid gap-6 py-7 sm:grid-cols-2"><ReportBlock title="Project information"><Row a="Project" b={design.name}/><Row a="Status" b="Prototype / demo output"/><Row a="Generated" b="08 Sep 2026"/></ReportBlock><ReportBlock title="Climate parameters"><Row a="Location" b={climate.location}/><Row a="Climate type" b={climate.climateType}/><Row a="Ambient temperature" b={`${climate.ambientTemperature} °C`}/><Row a="Solar radiation" b={`${climate.solarRadiation} W/m²`}/></ReportBlock><ReportBlock title="Shelter parameters"><Row a="Geometry" b={`${design.length} × ${design.width} × ${design.height} m`}/><Row a="Orientation" b={design.orientation}/><Row a="Window area" b={`${design.windowAreaPercentage}%`}/></ReportBlock><ReportBlock title="Simulation results"><Row a="Avg. internal temperature" b={`${sim.averageInternalTemperature} °C`}/><Row a="Solar gain" b={`${(sim.totalSolarGain/1000).toFixed(1)} kWh`}/><Row a="Heat loss" b={`${(sim.totalHeatLoss/1000).toFixed(1)} kWh`}/></ReportBlock></div><div className="rounded-lg bg-muted p-5"><div className="text-xs font-semibold uppercase tracking-wider">Interpretation note</div><p className="mt-2 text-sm leading-6 text-muted-foreground">This report is a structured preview for the SIH prototype. Values are mock simulation output and should not be treated as experimental, ANSYS, or real-world validated results.</p></div></section></div>}
 function ReportBlock({title,children}:{title:string;children:React.ReactNode}){return <div><h3 className="mb-3 text-sm font-semibold">{title}</h3><div className="flex flex-col gap-2">{children}</div></div>}
 function Row({a,b}:{a:string;b:string}){return <div className="flex justify-between gap-4 border-b border-border/70 pb-2 text-xs"><span className="text-muted-foreground">{a}</span><span className="text-right font-medium">{b}</span></div>}
